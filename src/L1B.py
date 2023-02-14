@@ -296,6 +296,13 @@ class L1B(object):
         self.dim[0] = self.eline-self.sline   
         self.dim[1] = self.epixl-self.spixl
 #        print(self.sline,self.eline,self.spixl,self.epixl)
+
+        # reset geolocation to subimage
+        self.latitude = self.latitude[self.sline:self.eline,
+                                      self.spixl:self.epixl]
+        self.longitude = self.longitude[self.sline:self.eline,
+                                        self.spixl:self.epixl]
+                                        
         nband=len(self.band)
         if self.sensor=="EPIC":
             refscale=np.array([2.685e-5,8.34e-6,6.66e-6,9.30e-6,1.435e-5])
@@ -431,7 +438,7 @@ class L1B(object):
             f=h5py.File(self.l1bname,'r')
             print('Generating GOCI slot data...')
             nav_data = f['HDFEOS/POINTS/Navigation for GOCI/Data/Navigation for GOCI']
-            self.goci_slot=goci_slots(nav_data, self.dim[0], self.dim[1], 7)
+            self.goci_slot = goci_slots(nav_data, self.sline, self.eline, self.spixl, self.epixl, 7)
             goci_slot_relat_time=goci_slots_time(nav_data)
             print('Finished generating GOCI slot data.')
             self.reflectance=np.zeros([self.dim[0],self.dim[1],nband])
@@ -456,6 +463,7 @@ class L1B(object):
             l1bmask[l1bmask==0]=-1
             l1bmask[l1bmask>0]=1
             f.close() 
+            l1bmask = l1bmask[self.sline:self.eline, self.spixl:self.epixl]
             self.goci_slot[l1bmask<0]=-1
             basetimestr =  basename(self.l1bname)[17:30]
             basedt = time.strptime(basetimestr,'%Y%m%d%H%M%S')
@@ -471,24 +479,23 @@ class L1B(object):
                 solz[self.goci_slot==i+1],sola[self.goci_slot==i+1] = goci_solar_angles(realdt.tm_year,realdt.tm_mon,realdt.tm_mday,realdt.tm_hour,realdt.tm_min,realdt.tm_sec,self.latitude[self.goci_slot==i+1],self.longitude[self.goci_slot==i+1])
                 senz[self.goci_slot==i+1] = goci_sensor_zenith(self.latitude[self.goci_slot==i+1],self.longitude[self.goci_slot==i+1])
                 sena[self.goci_slot==i+1] = goci_sensor_azimuth(self.latitude[self.goci_slot == i + 1], self.longitude[self.goci_slot == i + 1], 128.2)
-            self.solz = solz[self.sline:self.eline,self.spixl:self.epixl]            
-            self.senz = senz[self.sline:self.eline,self.spixl:self.epixl]
+            self.solz = solz            
+            self.senz = senz
             l1bmask[(solz<0) | (senz<0)] = -1
 #            idx_inval=np.isnan(senz)==1
             relaz = sena - 180.0 - sola
             relaz[relaz>180.] = 360.-relaz[relaz>180.]
             relaz[relaz<-180.] = 360.+relaz[relaz<-180.]
             relaz[l1bmask<0]=-999.0
-            self.relaz = relaz[self.sline:self.eline,self.spixl:self.epixl]
-            #reset geolocation to subimage 
-            self.latitude = self.latitude[self.sline:self.eline,self.spixl:self.epixl]
-            self.longitude = self.longitude[self.sline:self.eline,self.spixl:self.epixl]
-            
+            self.relaz = relaz
+          
             f=h5py.File(self.l1bname,'r')
             for i in np.arange(nband):
                 data=np.array(f['HDFEOS/GRIDS/Image Data/Data Fields/Band '+str(i+1)+' Image Pixel Values'])*scale[i]/goci_f0[i]/10.0/es_factor*self.l1bvgain[i]
                 data[l1bmask<0]=-1
-                self.reflectance[:,:,i]=data[self.sline:self.eline,self.spixl:self.epixl]
+                data = data[self.sline:self.eline, self.spixl:self.epixl]
+                data[l1bmask < 0] = -1
+                self.reflectance[:,:,i]=data / np.cos(np.deg2rad(self.solz))
             f.close()
             self.l1bmask=l1bmask
             
